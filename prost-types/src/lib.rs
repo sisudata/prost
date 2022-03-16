@@ -11,12 +11,15 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 #[rustfmt::skip]
 mod compiler;
 mod datetime;
 #[rustfmt::skip]
 mod protobuf;
 
+use alloc::{string::String, vec::Vec};
 use core::convert::TryFrom;
 use core::fmt;
 use core::i32;
@@ -25,6 +28,9 @@ use core::str::FromStr;
 use core::time;
 
 pub use protobuf::*;
+
+#[cfg(feature = "json")]
+pub mod serde;
 
 // The Protobuf `Duration` and `Timestamp` types can't delegate to the standard library equivalents
 // because the Protobuf versions are signed. To make them easier to work with, `From` conversions
@@ -399,6 +405,72 @@ impl FromStr for Timestamp {
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         datetime::DateTime::from(self.clone()).fmt(f)
+    }
+}
+
+impl Value {
+    /// Returns a `null` [`Value`].
+    pub fn null() -> Value {
+        Value {
+            kind: Some(value::Kind::NullValue(NullValue::NullValue as i32)),
+        }
+    }
+}
+
+impl From<f64> for Value {
+    fn from(val: f64) -> Value {
+        Value {
+            kind: Some(value::Kind::NumberValue(val)),
+        }
+    }
+}
+
+impl From<String> for Value {
+    fn from(val: String) -> Value {
+        Value {
+            kind: Some(value::Kind::StringValue(val)),
+        }
+    }
+}
+
+impl From<bool> for Value {
+    fn from(val: bool) -> Value {
+        Value {
+            kind: Some(value::Kind::BoolValue(val)),
+        }
+    }
+}
+
+impl From<i64> for Value {
+    fn from(val: i64) -> Value {
+        Value {
+            kind: Some(value::Kind::NumberValue(val as f64)),
+        }
+    }
+}
+
+impl<T> From<core::option::Option<T>> for Value
+where
+    Value: From<T>,
+{
+    fn from(val: core::option::Option<T>) -> Value {
+        match val {
+            Some(val) => Value::from(val),
+            None => Value::null(),
+        }
+    }
+}
+
+impl<T> From<Vec<T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(vec: Vec<T>) -> Value {
+        Value {
+            kind: Some(value::Kind::ListValue(ListValue {
+                values: vec.into_iter().map(|v| v.into()).collect(),
+            })),
+        }
     }
 }
 
