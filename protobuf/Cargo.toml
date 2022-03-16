@@ -10,7 +10,8 @@ edition = "2018"
 
 [dependencies]
 prost = { path = ".." }
-prost-types = { path = "../prost-types" }
+prost-types = { path = "../prost-types", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 anyhow = "1.0.1"
