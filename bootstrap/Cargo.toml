@@ -1,0 +1,13 @@
+[package]
+name = "bootstrap"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["std"]
+std = []
+
+[dev-dependencies]
+diff = "0.1"
+prost-build = { path = "../prost-build", features = ["cleanup-markdown"] }
+tempfile = "3"
