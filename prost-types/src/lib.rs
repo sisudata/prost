@@ -25,6 +25,10 @@ pub mod compiler {
 
 mod datetime;
 
+#[cfg(feature = "json")]
+pub mod serde;
+
+
 // The Protobuf `Duration` and `Timestamp` types can't delegate to the standard library equivalents
 // because the Protobuf versions are signed. To make them easier to work with, `From` conversions
 // are defined in both directions.
