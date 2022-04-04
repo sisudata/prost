@@ -126,6 +126,60 @@ impl TryFrom<Duration> for time::Duration {
     }
 }
 
+impl fmt::Display for Duration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = self.clone();
+        d.normalize();
+        if self.seconds < 0 && self.nanos < 0 {
+            write!(f, "-")?;
+        }
+        write!(f, "{}", d.seconds.abs())?;
+
+        // Format subseconds to either nothing, millis, micros, or nanos.
+        let nanos = d.nanos.abs();
+        if nanos == 0 {
+            write!(f, "s")
+        } else if nanos % 1_000_000 == 0 {
+            write!(f, ".{:03}s", nanos / 1_000_000)
+        } else if nanos % 1_000 == 0 {
+            write!(f, ".{:06}s", nanos / 1_000)
+        } else {
+            write!(f, ".{:09}s", nanos)
+        }
+    }
+}
+
+/// A duration handling error.
+#[derive(Debug, PartialEq)]
+#[non_exhaustive]
+pub enum DurationError {
+    /// Indicates failure to parse a [`Duration`] from a string.
+    ///
+    /// The [`Duration`] string format is specified in the [Protobuf JSON mapping specification][1].
+    ///
+    /// [1]: https://developers.google.com/protocol-buffers/docs/proto3#json
+    ParseFailure,
+}
+
+impl fmt::Display for DurationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DurationError::ParseFailure => write!(f, "failed to parse duration"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for DurationError {}
+
+impl FromStr for Duration {
+    type Err = DurationError;
+
+    fn from_str(s: &str) -> Result<Duration, DurationError> {
+        datetime::parse_duration(s).ok_or(DurationError::ParseFailure)
+    }
+}
+
 impl Timestamp {
     /// Normalizes the timestamp to a canonical format.
     ///
