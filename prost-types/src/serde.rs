@@ -72,15 +72,18 @@ impl<'de> ::serde::de::Visitor<'de> for DurationVisitor {
         let seconds = value.parse::<f64>().map_err(::serde::de::Error::custom)?;
 
         if seconds.is_sign_negative() {
-            let crate::Duration { seconds, nanos } =
-                std::time::Duration::from_secs_f64(-seconds).into();
+            let crate::Duration { seconds, nanos } = std::time::Duration::from_secs_f64(-seconds)
+                .try_into()
+                .map_err(::serde::de::Error::custom)?;
 
             Ok(crate::Duration {
                 seconds: -seconds,
                 nanos: -nanos,
             })
         } else {
-            Ok(std::time::Duration::from_secs_f64(seconds).into())
+            Ok(std::time::Duration::from_secs_f64(seconds)
+                .try_into()
+                .map_err(::serde::de::Error::custom)?)
         }
     }
 }

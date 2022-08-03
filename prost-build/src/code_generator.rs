@@ -1042,8 +1042,10 @@ impl<'a> CodeGenerator<'a> {
             self.append_doc(&fq_proto_enum_name, Some(variant.proto_name));
             self.append_field_attributes(&fq_proto_enum_name, variant.proto_name);
             self.push_indent();
-            self.buf
-                .push_str(&format!(r#"#[prost(enum_field_name="{}")]"#, value.name()));
+            self.buf.push_str(&format!(
+                r#"#[prost(enum_field_name="{}")]"#,
+                variant.proto_name
+            ));
             self.buf.push('\n');
             self.push_indent();
             self.buf.push_str(&variant.generated_variant_name);
