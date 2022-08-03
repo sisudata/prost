@@ -97,6 +97,37 @@ impl<'de> ::serde::Deserialize<'de> for crate::Duration {
     }
 }
 
+impl ::serde::Serialize for crate::Value {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::Serializer,
+    {
+        // TODO(dcb)
+        unimplemented!()
+    }
+}
+
+struct ValueVisitor;
+
+#[cfg(feature = "std")]
+impl<'de> ::serde::de::Visitor<'de> for ValueVisitor {
+    type Value = crate::Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a valid value string")
+    }
+}
+
+impl<'de> ::serde::Deserialize<'de> for crate::Value {
+    fn deserialize<D>(_deserializer: D) -> Result<crate::Value, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        // TODO(dcb)
+        unimplemented!()
+    }
+}
+
 pub trait HasConstructor {
     fn new() -> Self;
 }
@@ -1538,7 +1569,6 @@ pub mod i32 {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i32::try_from(value).map_err(E::custom)
         }
 
@@ -1564,7 +1594,6 @@ pub mod i32 {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i32::try_from(value).map_err(E::custom)
         }
 
@@ -1614,7 +1643,6 @@ pub mod i32_opt {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i32::try_from(value).map(Some).map_err(E::custom)
         }
 
@@ -1640,7 +1668,6 @@ pub mod i32_opt {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i32::try_from(value).map(Some).map_err(E::custom)
         }
 
@@ -1729,7 +1756,6 @@ pub mod i64 {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i64::try_from(value).map_err(E::custom)
         }
 
@@ -1817,7 +1843,6 @@ pub mod i64_opt {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             i64::try_from(value).map(Some).map_err(E::custom)
         }
 
@@ -1893,7 +1918,6 @@ pub mod u32 {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             u32::try_from(value).map_err(E::custom)
         }
 
@@ -1919,7 +1943,6 @@ pub mod u32 {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             u32::try_from(value).map_err(E::custom)
         }
 
@@ -1969,7 +1992,6 @@ pub mod u32_opt {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             u32::try_from(value).map(Some).map_err(E::custom)
         }
 
@@ -1995,7 +2017,6 @@ pub mod u32_opt {
         where
             E: serde::de::Error,
         {
-            use std::convert::TryFrom;
             u32::try_from(value).map(Some).map_err(E::custom)
         }
 
