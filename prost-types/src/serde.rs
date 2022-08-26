@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 #[cfg(feature = "std")]
 impl ::serde::Serialize for crate::Timestamp {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -98,12 +100,43 @@ impl<'de> ::serde::Deserialize<'de> for crate::Duration {
 }
 
 impl ::serde::Serialize for crate::Value {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: ::serde::Serializer,
     {
-        // TODO(dcb)
-        unimplemented!()
+        use serde::ser::Error;
+
+        // It's invalid to serialize a `Value` without a variant set, per [1].
+        //
+        // [1]: https://developers.google.com/protocol-buffers/docs/reference/google.protobuf#google.protobuf.Value
+        let kind = self
+            .kind
+            .as_ref()
+            .ok_or_else(|| S::Error::custom("invalid value: variant must be set"))?;
+        match kind {
+            crate::value::Kind::NullValue(_) => serializer.serialize_unit(),
+            crate::value::Kind::NumberValue(value) => {
+                // Per [1]:
+                //
+                // > Note that attempting to serialize NaN or Infinity results in error. (We can't
+                // > serialize these as string "NaN" or "Infinity" values like we do for regular
+                // > fields, because they would parse as string_value, not number_value).
+                if !value.is_finite() {
+                    return Err(S::Error::custom(
+                        "number values must not be NaN or infinite",
+                    ));
+                }
+                serializer.serialize_f64(*value)
+            }
+            crate::value::Kind::StringValue(value) => serializer.serialize_str(value),
+            crate::value::Kind::BoolValue(value) => serializer.serialize_bool(*value),
+            crate::value::Kind::StructValue(crate::Struct { fields }) => {
+                fields.serialize(serializer)
+            }
+            crate::value::Kind::ListValue(crate::ListValue { values }) => {
+                values.serialize(serializer)
+            }
+        }
     }
 }
 
@@ -114,17 +147,108 @@ impl<'de> ::serde::de::Visitor<'de> for ValueVisitor {
     type Value = crate::Value;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a valid value string")
+        formatter.write_str("a valid value")
+    }
+
+    #[inline]
+    fn visit_bool<E>(self, value: bool) -> Result<crate::Value, E> {
+        Ok(crate::Value::from(value))
+    }
+
+    #[inline]
+    fn visit_i64<E>(self, value: i64) -> Result<crate::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_f64(value as f64)
+    }
+
+    #[inline]
+    fn visit_u64<E>(self, value: u64) -> Result<crate::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_f64(value as f64)
+    }
+
+    #[inline]
+    fn visit_f64<E>(self, value: f64) -> Result<crate::Value, E> {
+        Ok(crate::Value::from(value))
+    }
+
+    #[inline]
+    fn visit_str<E>(self, value: &str) -> Result<crate::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_string(String::from(value))
+    }
+
+    #[inline]
+    fn visit_string<E>(self, value: String) -> Result<crate::Value, E> {
+        Ok(crate::Value::from(value))
+    }
+
+    #[inline]
+    fn visit_none<E>(self) -> Result<crate::Value, E> {
+        Ok(crate::Value::null())
+    }
+
+    #[inline]
+    fn visit_some<D>(self, deserializer: D) -> Result<crate::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde::Deserialize::deserialize(deserializer)
+    }
+
+    #[inline]
+    fn visit_unit<E>(self) -> Result<crate::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_none()
+    }
+
+    #[inline]
+    fn visit_seq<V>(self, mut visitor: V) -> Result<crate::Value, V::Error>
+    where
+        V: serde::de::SeqAccess<'de>,
+    {
+        let mut values = Vec::with_capacity(visitor.size_hint().unwrap_or(0));
+
+        while let Some(elem) = visitor.next_element()? {
+            values.push(elem);
+        }
+
+        Ok(crate::Value {
+            kind: Some(crate::value::Kind::ListValue(crate::ListValue { values })),
+        })
+    }
+
+    #[cfg(any(feature = "std", feature = "alloc"))]
+    fn visit_map<V>(self, mut visitor: V) -> Result<crate::Value, V::Error>
+    where
+        V: serde::de::MapAccess<'de>,
+    {
+        let mut fields = BTreeMap::new();
+
+        while let Some((key, value)) = visitor.next_entry()? {
+            fields.insert(key, value);
+        }
+
+        Ok(crate::Value {
+            kind: Some(crate::value::Kind::StructValue(crate::Struct { fields })),
+        })
     }
 }
 
 impl<'de> ::serde::Deserialize<'de> for crate::Value {
-    fn deserialize<D>(_deserializer: D) -> Result<crate::Value, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<crate::Value, D::Error>
     where
         D: ::serde::Deserializer<'de>,
     {
-        // TODO(dcb)
-        unimplemented!()
+        deserializer.deserialize_any(ValueVisitor)
     }
 }
 
@@ -648,6 +772,8 @@ pub mod enum_opt {
 }
 
 pub mod btree_map_custom_value {
+    use std::collections::BTreeMap;
+
     struct MapVisitor<'de, T, V>
     where
         T: serde::Deserialize<'de>,
@@ -665,7 +791,7 @@ pub mod btree_map_custom_value {
         T: serde::Deserialize<'de> + std::cmp::Eq + std::cmp::Ord,
         V: serde::de::Visitor<'de> + crate::serde::HasConstructor,
     {
-        type Value = std::collections::BTreeMap<T, <V as serde::de::Visitor<'de>>::Value>;
+        type Value = BTreeMap<T, <V as serde::de::Visitor<'de>>::Value>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -699,7 +825,7 @@ pub mod btree_map_custom_value {
     #[cfg(feature = "std")]
     pub fn deserialize<'de, D, T, V>(
         deserializer: D,
-    ) -> Result<std::collections::BTreeMap<T, <V as serde::de::Visitor<'de>>::Value>, D::Error>
+    ) -> Result<BTreeMap<T, <V as serde::de::Visitor<'de>>::Value>, D::Error>
     where
         D: serde::Deserializer<'de>,
         T: 'de + serde::Deserialize<'de> + std::cmp::Eq + std::cmp::Ord,
@@ -711,7 +837,7 @@ pub mod btree_map_custom_value {
     }
 
     pub fn serialize<S, T, F>(
-        value: &std::collections::BTreeMap<T, <F as crate::serde::SerializeMethod>::Value>,
+        value: &BTreeMap<T, <F as crate::serde::SerializeMethod>::Value>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -729,6 +855,8 @@ pub mod btree_map_custom_value {
 }
 
 pub mod map_custom_value {
+    use std::collections::HashMap;
+
     struct MapVisitor<'de, T, V>
     where
         T: serde::Deserialize<'de>,
@@ -746,7 +874,7 @@ pub mod map_custom_value {
         T: serde::Deserialize<'de> + std::cmp::Eq + std::hash::Hash,
         V: serde::de::Visitor<'de> + crate::serde::HasConstructor,
     {
-        type Value = std::collections::HashMap<T, <V as serde::de::Visitor<'de>>::Value>;
+        type Value = HashMap<T, <V as serde::de::Visitor<'de>>::Value>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -780,7 +908,7 @@ pub mod map_custom_value {
     #[cfg(feature = "std")]
     pub fn deserialize<'de, D, T, V>(
         deserializer: D,
-    ) -> Result<std::collections::HashMap<T, <V as serde::de::Visitor<'de>>::Value>, D::Error>
+    ) -> Result<HashMap<T, <V as serde::de::Visitor<'de>>::Value>, D::Error>
     where
         D: serde::Deserializer<'de>,
         T: 'de + serde::Deserialize<'de> + std::cmp::Eq + std::hash::Hash,
@@ -792,7 +920,7 @@ pub mod map_custom_value {
     }
 
     pub fn serialize<S, T, F>(
-        value: &std::collections::HashMap<T, <F as crate::serde::SerializeMethod>::Value>,
+        value: &HashMap<T, <F as crate::serde::SerializeMethod>::Value>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -810,6 +938,8 @@ pub mod map_custom_value {
 }
 
 pub mod map_custom {
+    use std::collections::HashMap;
+
     struct MapVisitor<'de, T, V>
     where
         T: serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -828,7 +958,7 @@ pub mod map_custom {
         V: serde::Deserialize<'de>,
         <T as serde::de::Visitor<'de>>::Value: std::cmp::Eq + std::hash::Hash,
     {
-        type Value = std::collections::HashMap<<T as serde::de::Visitor<'de>>::Value, V>;
+        type Value = HashMap<<T as serde::de::Visitor<'de>>::Value, V>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -862,7 +992,7 @@ pub mod map_custom {
     #[cfg(feature = "std")]
     pub fn deserialize<'de, D, T, V>(
         deserializer: D,
-    ) -> Result<std::collections::HashMap<<T as serde::de::Visitor<'de>>::Value, V>, D::Error>
+    ) -> Result<HashMap<<T as serde::de::Visitor<'de>>::Value, V>, D::Error>
     where
         D: serde::Deserializer<'de>,
         T: 'de + serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -875,7 +1005,7 @@ pub mod map_custom {
     }
 
     pub fn serialize<S, F, V>(
-        value: &std::collections::HashMap<<F as crate::serde::SerializeMethod>::Value, V>,
+        value: &HashMap<<F as crate::serde::SerializeMethod>::Value, V>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -894,6 +1024,8 @@ pub mod map_custom {
 }
 
 pub mod map_custom_to_custom {
+    use std::collections::HashMap;
+
     struct MapVisitor<'de, T, S>
     where
         T: serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -912,10 +1044,8 @@ pub mod map_custom_to_custom {
         S: serde::de::Visitor<'de> + crate::serde::HasConstructor,
         <T as serde::de::Visitor<'de>>::Value: std::cmp::Eq + std::hash::Hash,
     {
-        type Value = std::collections::HashMap<
-            <T as serde::de::Visitor<'de>>::Value,
-            <S as serde::de::Visitor<'de>>::Value,
-        >;
+        type Value =
+            HashMap<<T as serde::de::Visitor<'de>>::Value, <S as serde::de::Visitor<'de>>::Value>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -952,10 +1082,7 @@ pub mod map_custom_to_custom {
     pub fn deserialize<'de, D, T, S>(
         deserializer: D,
     ) -> Result<
-        std::collections::HashMap<
-            <T as serde::de::Visitor<'de>>::Value,
-            <S as serde::de::Visitor<'de>>::Value,
-        >,
+        HashMap<<T as serde::de::Visitor<'de>>::Value, <S as serde::de::Visitor<'de>>::Value>,
         D::Error,
     >
     where
@@ -970,7 +1097,7 @@ pub mod map_custom_to_custom {
     }
 
     pub fn serialize<S, F, G>(
-        value: &std::collections::HashMap<
+        value: &HashMap<
             <F as crate::serde::SerializeMethod>::Value,
             <G as crate::serde::SerializeMethod>::Value,
         >,
@@ -995,6 +1122,8 @@ pub mod map_custom_to_custom {
 }
 
 pub mod btree_map_custom {
+    use std::collections::BTreeMap;
+
     struct MapVisitor<'de, T, V>
     where
         T: serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -1013,7 +1142,7 @@ pub mod btree_map_custom {
         V: serde::Deserialize<'de>,
         <T as serde::de::Visitor<'de>>::Value: std::cmp::Eq + std::cmp::Ord,
     {
-        type Value = std::collections::BTreeMap<<T as serde::de::Visitor<'de>>::Value, V>;
+        type Value = BTreeMap<<T as serde::de::Visitor<'de>>::Value, V>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -1047,7 +1176,7 @@ pub mod btree_map_custom {
     #[cfg(feature = "std")]
     pub fn deserialize<'de, D, T, V>(
         deserializer: D,
-    ) -> Result<std::collections::BTreeMap<<T as serde::de::Visitor<'de>>::Value, V>, D::Error>
+    ) -> Result<BTreeMap<<T as serde::de::Visitor<'de>>::Value, V>, D::Error>
     where
         D: serde::Deserializer<'de>,
         T: 'de + serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -1060,7 +1189,7 @@ pub mod btree_map_custom {
     }
 
     pub fn serialize<S, F, V>(
-        value: &std::collections::BTreeMap<<F as crate::serde::SerializeMethod>::Value, V>,
+        value: &BTreeMap<<F as crate::serde::SerializeMethod>::Value, V>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -1079,6 +1208,8 @@ pub mod btree_map_custom {
 }
 
 pub mod btree_map_custom_to_custom {
+    use std::collections::BTreeMap;
+
     struct MapVisitor<'de, T, S>
     where
         T: serde::de::Visitor<'de> + crate::serde::HasConstructor,
@@ -1097,10 +1228,8 @@ pub mod btree_map_custom_to_custom {
         S: serde::de::Visitor<'de> + crate::serde::HasConstructor,
         <T as serde::de::Visitor<'de>>::Value: std::cmp::Eq + std::cmp::Ord,
     {
-        type Value = std::collections::BTreeMap<
-            <T as serde::de::Visitor<'de>>::Value,
-            <S as serde::de::Visitor<'de>>::Value,
-        >;
+        type Value =
+            BTreeMap<<T as serde::de::Visitor<'de>>::Value, <S as serde::de::Visitor<'de>>::Value>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -1137,10 +1266,7 @@ pub mod btree_map_custom_to_custom {
     pub fn deserialize<'de, D, T, S>(
         deserializer: D,
     ) -> Result<
-        std::collections::BTreeMap<
-            <T as serde::de::Visitor<'de>>::Value,
-            <S as serde::de::Visitor<'de>>::Value,
-        >,
+        BTreeMap<<T as serde::de::Visitor<'de>>::Value, <S as serde::de::Visitor<'de>>::Value>,
         D::Error,
     >
     where
@@ -1155,7 +1281,7 @@ pub mod btree_map_custom_to_custom {
     }
 
     pub fn serialize<S, F, G>(
-        value: &std::collections::BTreeMap<
+        value: &BTreeMap<
             <F as crate::serde::SerializeMethod>::Value,
             <G as crate::serde::SerializeMethod>::Value,
         >,
@@ -1203,6 +1329,8 @@ impl<'a, T: SerializeMethod> serde::Serialize for MySeType<'a, T> {
 }
 
 pub mod map {
+    use std::collections::HashMap;
+
     struct MapVisitor<'de, K, V>
     where
         K: serde::Deserialize<'de> + std::cmp::Eq + std::hash::Hash,
@@ -1219,7 +1347,7 @@ pub mod map {
             V: serde::Deserialize<'de>,
         > serde::de::Visitor<'de> for MapVisitor<'de, K, V>
     {
-        type Value = std::collections::HashMap<K, V>;
+        type Value = HashMap<K, V>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -1255,7 +1383,7 @@ pub mod map {
         V: 'de + serde::Deserialize<'de>,
     >(
         deserializer: D,
-    ) -> Result<std::collections::HashMap<K, V>, D::Error>
+    ) -> Result<HashMap<K, V>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -1267,6 +1395,8 @@ pub mod map {
 }
 
 pub mod btree_map {
+    use std::collections::BTreeMap;
+
     struct MapVisitor<'de, K, V>
     where
         K: serde::Deserialize<'de> + std::cmp::Eq + std::cmp::Ord,
@@ -1283,7 +1413,7 @@ pub mod btree_map {
             V: serde::Deserialize<'de>,
         > serde::de::Visitor<'de> for MapVisitor<'de, K, V>
     {
-        type Value = std::collections::BTreeMap<K, V>;
+        type Value = BTreeMap<K, V>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a valid map")
@@ -1319,7 +1449,7 @@ pub mod btree_map {
         V: 'de + serde::Deserialize<'de>,
     >(
         deserializer: D,
-    ) -> Result<std::collections::BTreeMap<K, V>, D::Error>
+    ) -> Result<BTreeMap<K, V>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
