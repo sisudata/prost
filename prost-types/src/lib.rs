@@ -11,6 +11,9 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{string::String, vec::Vec};
 use core::convert::TryFrom;
 use core::fmt;
 use core::i32;
@@ -443,11 +446,11 @@ impl From<i64> for Value {
     }
 }
 
-impl<T> From<std::option::Option<T>> for Value
+impl<T> From<core::option::Option<T>> for Value
 where
     Value: From<T>,
 {
-    fn from(val: std::option::Option<T>) -> Value {
+    fn from(val: core::option::Option<T>) -> Value {
         match val {
             Some(val) => Value::from(val),
             None => Value::null(),
